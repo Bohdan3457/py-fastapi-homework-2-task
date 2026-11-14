@@ -295,18 +295,34 @@ async def update_movie(
             MovieModel.id == movie_id
         )
     )
-
     if movie is None:
         raise HTTPException(
             status_code=404,
             detail="Movie with the given ID was not found."
         )
-
     result = movie_data.model_dump(exclude_unset=True)
-
+    name = result.get("name", movie.name)
+    date = result.get("date", movie.date)
+    existing_movie = await db.scalar(
+        select(MovieModel).where(
+            MovieModel.name == name,
+            MovieModel.date == date,
+            MovieModel.id != movie_id
+        )
+    )
+    if existing_movie is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="A movie with this name and release date already exists."
+        )
     for key, value in result.items():
         setattr(movie, key, value)
-
-    await db.commit()
-
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Movie already exists."
+        )
     return {"detail": "Movie updated successfully."}
