@@ -84,6 +84,16 @@ class MovieCreateSchema(MovieModelBase):
     budget: float = Field(ge=0)
     revenue: float = Field(ge=0)
 
+    @model_validator(mode="after")
+    def validate_unique_values(self):
+        for field in ("genres", "actors", "languages"):
+            values = getattr(self, field)
+
+            if len(values) != len(set(values)):
+                raise ValueError(f"Duplicate values in {field}")
+
+        return self
+
     @field_validator("date")
     @classmethod
     def validate_date(

@@ -1,6 +1,6 @@
 from typing import Any, Callable
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
@@ -8,7 +8,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.requests import Request
-
+from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException
 import database
 from database import get_db, MovieModel
 from database.models import (
@@ -129,82 +130,90 @@ async def create_movie(
                    f" already exists."
         )
 
-    country = await db.scalar(
-        select(CountryModel).where(
-            CountryModel.code == movie_data.country
-        )
-    )
-
-    if country is None:
-        country = CountryModel(code=movie_data.country)
-        db.add(country)
-
-    genres = []
-
-    for genre in movie_data.genres:
-        result = await db.scalar(
-            select(GenreModel).where(
-                GenreModel.name == genre
+    try:
+        country = await db.scalar(
+            select(CountryModel).where(
+                CountryModel.code == movie_data.country
             )
         )
 
-        if result is None:
-            result = GenreModel(name=genre)
-            db.add(result)
+        if country is None:
+            country = CountryModel(code=movie_data.country)
+            db.add(country)
 
-        genres.append(result)
+        genres = []
 
-    actors = []
-
-    for actor in movie_data.actors:
-        result = await db.scalar(
-            select(ActorModel).where(
-                ActorModel.name == actor
+        for genre in movie_data.genres:
+            result = await db.scalar(
+                select(GenreModel).where(
+                    GenreModel.name == genre
+                )
             )
+
+            if result is None:
+                result = GenreModel(name=genre)
+                db.add(result)
+
+            genres.append(result)
+
+        actors = []
+
+        for actor in movie_data.actors:
+            result = await db.scalar(
+                select(ActorModel).where(
+                    ActorModel.name == actor
+                )
+            )
+
+            if result is None:
+                result = ActorModel(name=actor)
+                db.add(result)
+
+            actors.append(result)
+
+        languages = []
+
+        for language in movie_data.languages:
+            result = await db.scalar(
+                select(LanguageModel).where(
+                    LanguageModel.name == language
+                )
+            )
+
+            if result is None:
+                result = LanguageModel(name=language)
+                db.add(result)
+
+            languages.append(result)
+
+        exclude_fields = {
+            "country",
+            "genres",
+            "actors",
+            "languages"
+        }
+
+        movie_fields = movie_data.model_dump(
+            exclude=exclude_fields
         )
 
-        if result is None:
-            result = ActorModel(name=actor)
-            db.add(result)
-
-        actors.append(result)
-
-    languages = []
-
-    for language in movie_data.languages:
-        result = await db.scalar(
-            select(LanguageModel).where(
-                LanguageModel.name == language
-            )
+        movie = MovieModel(
+            **movie_fields,
+            country=country,
+            genres=genres,
+            actors=actors,
+            languages=languages
         )
 
-        if result is None:
-            result = LanguageModel(name=language)
-            db.add(result)
+        db.add(movie)
+        await db.commit()
 
-        languages.append(result)
-
-    exclude_fields = {
-        "country",
-        "genres",
-        "actors",
-        "languages"
-    }
-
-    movie_fields = movie_data.model_dump(
-        exclude=exclude_fields
-    )
-
-    movie = MovieModel(
-        **movie_fields,
-        country=country,
-        genres=genres,
-        actors=actors,
-        languages=languages
-    )
-
-    db.add(movie)
-    await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Movie or related data already exists."
+        )
 
     movie = await db.scalar(
         select(MovieModel)
