@@ -1,3 +1,7 @@
+import datetime
+from typing import Any
+
+import pycountry
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -5,9 +9,8 @@ from pydantic import (
     field_validator,
     model_validator
 )
-import datetime
+
 from database.models import MovieStatusEnum
-import pycountry
 
 
 class MovieModelBase(BaseModel):
@@ -21,7 +24,7 @@ class MovieModelBase(BaseModel):
 
 
 class MovieListItemSchema(BaseModel):
-    id: int
+    id_: int = Field(alias="id")
     name: str
     date: datetime.date
     score: float
@@ -39,7 +42,7 @@ class MovieListResponseSchema(BaseModel):
 
 
 class CountrySchema(BaseModel):
-    id: int
+    id_: int = Field(alias="id")
     code: str
     name: str | None
 
@@ -47,15 +50,14 @@ class CountrySchema(BaseModel):
 
 
 class GenreSchema(BaseModel):
-    id: int
+    id_: int = Field(alias="id")
     name: str
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class ActorSchema(GenreSchema):
-    id: int
-    name: str
+    pass
 
 
 class LanguageSchema(GenreSchema):
@@ -63,7 +65,7 @@ class LanguageSchema(GenreSchema):
 
 
 class MovieSchema(MovieModelBase):
-    id: int
+    id_: int = Field(alias="id")
     country: CountrySchema
     genres: list[GenreSchema]
     actors: list[ActorSchema]
@@ -84,21 +86,30 @@ class MovieCreateSchema(MovieModelBase):
 
     @field_validator("date")
     @classmethod
-    def validate_date(cls, value):
+    def validate_date(
+            cls,
+            value: datetime.date
+    ) -> datetime.date:
         today = datetime.date.today()
+
         try:
             max_date = today.replace(year=today.year + 1)
         except ValueError:
-            max_date = today.replace(year=today.year + 1, day=28)
+            max_date = today.replace(
+                year=today.year + 1,
+                day=28
+            )
 
         if value > max_date:
-            raise ValueError("Date cannot be more than one year in the future")
+            raise ValueError(
+                "Date cannot be more than one year in the future"
+            )
 
         return value
 
     @field_validator("country")
     @classmethod
-    def validate_country(cls, value):
+    def validate_country(cls, value: str) -> str:
         value = value.upper()
 
         if pycountry.countries.get(alpha_3=value) is None:
@@ -118,7 +129,7 @@ class MovieUpdateSchema(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def reject_null_values(cls, values):
+    def reject_null_values(cls, values: Any) -> Any:
         if isinstance(values, dict):
             if any(value is None for value in values.values()):
                 raise ValueError("Null values are not allowed.")

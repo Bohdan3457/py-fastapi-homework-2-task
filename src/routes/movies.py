@@ -1,25 +1,35 @@
+from typing import Any, Callable
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response
+from fastapi.routing import APIRoute
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.requests import Request
+
 import database
+from database import get_db, MovieModel
+from database.models import (
+    CountryModel,
+    GenreModel,
+    ActorModel,
+    LanguageModel
+)
 from schemas.movies import (
     MovieListResponseSchema,
     MovieCreateSchema,
-    MovieSchema, MovieUpdateSchema
+    MovieSchema,
+    MovieUpdateSchema
 )
-from database import get_db, MovieModel
-from database.models import CountryModel, GenreModel, ActorModel, LanguageModel
-from fastapi.routing import APIRoute
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 
 
 class ValidationErrorRoute(APIRoute):
-    def get_route_handler(self):
+    def get_route_handler(self) -> Callable[..., Any]:
         original_route_handler = super().get_route_handler()
 
-        async def custom_route_handler(request):
+        async def custom_route_handler(request: Request) -> Response:
             try:
                 return await original_route_handler(request)
             except RequestValidationError:
@@ -36,34 +46,55 @@ class ValidationErrorRoute(APIRoute):
 router = APIRouter(route_class=ValidationErrorRoute)
 
 
-@router.get("/movies/", response_model=MovieListResponseSchema)
+@router.get(
+    "/movies/",
+    response_model=MovieListResponseSchema
+)
 async def get_all_movies(
         db: AsyncSession = Depends(get_db),
         page: int = Query(1, ge=1),
         per_page: int = Query(10, ge=1, le=20)
-):
-    total_items = await db.scalar(select(func.count()).select_from(MovieModel))
-    if total_items <= 0:
-        raise HTTPException(status_code=404, detail="No movies found.")
-    result = await db.scalars(
-        select(database.models.MovieModel).order_by(
-            MovieModel.id.desc()).offset(
-            (page - 1) * per_page).limit(per_page)
+) -> MovieListResponseSchema:
+    total_items = await db.scalar(
+        select(func.count()).select_from(MovieModel)
     )
+
+    if total_items <= 0:
+        raise HTTPException(
+            status_code=404,
+            detail="No movies found."
+        )
+
+    result = await db.scalars(
+        select(database.models.MovieModel)
+        .order_by(MovieModel.id.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    )
+
     total_pages = (total_items + per_page - 1) // per_page
 
     movies = result.all()
+
     if not movies:
-        raise HTTPException(status_code=404, detail="No movies found.")
+        raise HTTPException(
+            status_code=404,
+            detail="No movies found."
+        )
 
     if page <= 1:
         prev_page = None
     else:
-        prev_page = f"/theater/movies/?page={page - 1}&per_page={per_page}"
+        prev_page = (
+            f"/theater/movies/?page={page - 1}&per_page={per_page}"
+        )
+
     if total_pages <= page:
         next_page = None
     else:
-        next_page = f"/theater/movies/?page={page + 1}&per_page={per_page}"
+        next_page = (
+            f"/theater/movies/?page={page + 1}&per_page={per_page}"
+        )
 
     return {
         "movies": movies,
@@ -74,15 +105,22 @@ async def get_all_movies(
     }
 
 
-@router.post("/movies/", response_model=MovieSchema, status_code=201)
+@router.post(
+    "/movies/",
+    response_model=MovieSchema,
+    status_code=201
+)
 async def create_movie(
         movie_data: MovieCreateSchema,
         db: AsyncSession = Depends(get_db)
-):
-    result = await db.scalar(select(MovieModel).where(
-        MovieModel.name == movie_data.name,
-        MovieModel.date == movie_data.date
-    ))
+) -> MovieSchema:
+    result = await db.scalar(
+        select(MovieModel).where(
+            MovieModel.name == movie_data.name,
+            MovieModel.date == movie_data.date
+        )
+    )
+
     if result is not None:
         raise HTTPException(
             status_code=409,
@@ -91,8 +129,10 @@ async def create_movie(
                    f" already exists."
         )
 
-    country = await db.scalar(select(CountryModel).where(
-        CountryModel.code == movie_data.country)
+    country = await db.scalar(
+        select(CountryModel).where(
+            CountryModel.code == movie_data.country
+        )
     )
 
     if country is None:
@@ -100,20 +140,29 @@ async def create_movie(
         db.add(country)
 
     genres = []
+
     for genre in movie_data.genres:
-        result = await db.scalar(select(GenreModel).where(
-            GenreModel.name == genre
-        ))
+        result = await db.scalar(
+            select(GenreModel).where(
+                GenreModel.name == genre
+            )
+        )
+
         if result is None:
             result = GenreModel(name=genre)
             db.add(result)
+
         genres.append(result)
 
     actors = []
+
     for actor in movie_data.actors:
-        result = await db.scalar(select(ActorModel).where(
-            ActorModel.name == actor
-        ))
+        result = await db.scalar(
+            select(ActorModel).where(
+                ActorModel.name == actor
+            )
+        )
+
         if result is None:
             result = ActorModel(name=actor)
             db.add(result)
@@ -121,10 +170,13 @@ async def create_movie(
         actors.append(result)
 
     languages = []
+
     for language in movie_data.languages:
-        result = await db.scalar(select(LanguageModel).where(
-            LanguageModel.name == language
-        ))
+        result = await db.scalar(
+            select(LanguageModel).where(
+                LanguageModel.name == language
+            )
+        )
 
         if result is None:
             result = LanguageModel(name=language)
@@ -132,15 +184,25 @@ async def create_movie(
 
         languages.append(result)
 
-    exclude_fields = {"country", "genres", "actors", "languages"}
-    movie_fields = movie_data.model_dump(exclude=exclude_fields)
+    exclude_fields = {
+        "country",
+        "genres",
+        "actors",
+        "languages"
+    }
+
+    movie_fields = movie_data.model_dump(
+        exclude=exclude_fields
+    )
+
     movie = MovieModel(
         **movie_fields,
         country=country,
         genres=genres,
         actors=actors,
-        languages=languages,
+        languages=languages
     )
+
     db.add(movie)
     await db.commit()
 
@@ -165,7 +227,7 @@ async def create_movie(
 async def get_movie_by_id(
         movie_id: int,
         db: AsyncSession = Depends(get_db)
-):
+) -> MovieSchema:
     movie = await db.scalar(
         select(MovieModel)
         .options(
@@ -192,16 +254,20 @@ async def get_movie_by_id(
 )
 async def delete_movie(
         movie_id: int,
-        db: AsyncSession = Depends(get_db),
-):
-    movie = await db.scalar(select(MovieModel).where(
-        MovieModel.id == movie_id
-    ))
+        db: AsyncSession = Depends(get_db)
+) -> None:
+    movie = await db.scalar(
+        select(MovieModel).where(
+            MovieModel.id == movie_id
+        )
+    )
+
     if movie is None:
         raise HTTPException(
             status_code=404,
             detail="Movie with the given ID was not found."
         )
+
     await db.delete(movie)
     await db.commit()
 
@@ -214,16 +280,19 @@ async def update_movie(
         movie_id: int,
         movie_data: MovieUpdateSchema,
         db: AsyncSession = Depends(get_db)
-):
-    movie = await db.scalar(select(MovieModel).where(
-        MovieModel.id == movie_id
-    ))
+) -> dict[str, str]:
+    movie = await db.scalar(
+        select(MovieModel).where(
+            MovieModel.id == movie_id
+        )
+    )
 
     if movie is None:
         raise HTTPException(
             status_code=404,
             detail="Movie with the given ID was not found."
         )
+
     result = movie_data.model_dump(exclude_unset=True)
 
     for key, value in result.items():
